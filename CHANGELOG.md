@@ -1,5 +1,18 @@
 # Mighty Change Log
 
+## 3.2.0
+
+ - Improve async support and optional explicit `DbConnection` support in CRUD methods: New, Insert, Update, Save, Delete
+
+## 3.1.3
+
+ - Prevent .NET Core ProviderName support getting confused by extra spacing in the connection string
+
+## 3.1.2
+
+- Convert DataContractStore and TableMetaDataStore from Dictionary to ConcurrentDictionary
+- Fix bug in DataContractKey.Equals
+
 ## 3.1.1
 
 - Minor updates to NuGet package description only
@@ -16,7 +29,7 @@
 
 ## 3.0.5
 
-Fix Intellisense code comments not working due to [stackoverflow.com/a/57731750/795690](https://stackoverflow.com/a/57731750/795690)
+ - Fix Intellisense code comments not working due to [stackoverflow.com/a/57731750/795690](https://stackoverflow.com/a/57731750/795690)
 
 ## 3.0.4
 

@@ -3,24 +3,37 @@ using System;
 using System.Collections;
 using Dasync.Collections;
 using System.Collections.Generic;
-using System.Data;
-using System.Dynamic;
+using System.Data.Common;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading.Tasks;
 using Mighty.Dynamic.Tests.SqlServer.TableClasses;
 using NUnit.Framework;
 
 namespace Mighty.Dynamic.Tests.SqlServer
 {
-    [TestFixture]
+    /// <summary>
+    /// Suite of tests for stored procedures and functions on SQL Server database.
+    /// </summary>
+    /// <remarks>
+    /// Runs against functions and procedures which are already in the AdventureWorks test database.
+    /// </remarks>
+    [TestFixture("System.Data.SqlClient")]
+#if NETCOREAPP3_1
+    [TestFixture("Microsoft.Data.SqlClient")]
+#endif
     public class AsyncWriteTests
     {
+        private readonly string ProviderName;
+
+        public AsyncWriteTests(string providerName)
+        {
+            ProviderName = providerName;
+        }
+
         [Test]
         public async Task Insert_SingleRow()
         {
-            var categories = new Category();
+            var categories = new Category(ProviderName);
             var inserted = await categories.InsertAsync(new {CategoryName = "Cool stuff", Description = "You know... cool stuff! Cool. n. stuff."});
             int insertedCategoryID = inserted.CategoryID;
             Assert.IsTrue(insertedCategoryID > 0);
@@ -30,9 +43,14 @@ namespace Mighty.Dynamic.Tests.SqlServer
         [Test]
         public async Task Insert_MultipleRows()
         {
-            var categories = new Category();
-            var toInsert = new List<dynamic>();
             var CategoryName = "Cat Insert_MR";
+
+            var categories = new Category(ProviderName);
+
+            // clear down
+            await categories.DeleteAsync(where: "CategoryName=@0", args: CategoryName);
+
+            var toInsert = new List<dynamic>();
             toInsert.Add(new { CategoryName, Description = "cat 1 desc" });
             toInsert.Add(new { CategoryName, Description = "cat 2 desc" });
             var inserted = await categories.InsertAsync(toInsert.ToArray());
@@ -52,7 +70,7 @@ namespace Mighty.Dynamic.Tests.SqlServer
         [Test]
         public async Task Update_SingleRow()
         {
-            var categories = new Category();
+            var categories = new Category(ProviderName);
             // insert something to update first. 
             var inserted = await categories.InsertAsync(new { CategoryName = "Cool stuff", Description = "You know... cool stuff! Cool. n. stuff." });
             int insertedCategoryID = inserted.CategoryID;
@@ -75,44 +93,65 @@ namespace Mighty.Dynamic.Tests.SqlServer
 
 
         [Test]
-        public async Task Update_MultipleRows()
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task Update_MultipleRows(bool explicitConnection)
         {
             // first insert 2 categories and 4 products, one for each category
-            var categories = new Category();
-            var insertedCategory1 = await categories.InsertAsync(new {CategoryName = "Category 1", Description = "Cat 1 desc"});
-            int category1ID = insertedCategory1.CategoryID;
-            Assert.IsTrue(category1ID > 0);
-            var insertedCategory2 = await categories.InsertAsync(new { CategoryName = "Category 2", Description = "Cat 2 desc" });
-            int category2ID = insertedCategory2.CategoryID;
-            Assert.IsTrue(category2ID > 0);
+            var categories = new Category(ProviderName, explicitConnection);
+            DbConnection connection = null;
+            if (explicitConnection)
+            {
+                MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnectionAsync(categories);
+                connection = await categories.OpenConnectionAsync(MightyTests.ConnectionStringUtils.GetConnectionString(TestConstants.WriteTestConnection, ProviderName));
+            }
+            using (connection)
+            {
+                var insertedCategory1 = await categories.InsertAsync(new { CategoryName = "Category 1", Description = "Cat 1 desc" }, connection: connection);
+                int category1ID = insertedCategory1.CategoryID;
+                Assert.IsTrue(category1ID > 0);
+                var insertedCategory2 = await categories.InsertAsync(new { CategoryName = "Category 2", Description = "Cat 2 desc" }, connection: connection);
+                int category2ID = insertedCategory2.CategoryID;
+                Assert.IsTrue(category2ID > 0);
 
-            var products = new Product();
-            for(int i = 0; i < 4; i++)
-            {
-                var category = i % 2 == 0 ? insertedCategory1 : insertedCategory2;
-                var p = await products.InsertAsync(new {ProductName = "Prod" + i, category.CategoryID});
-                Assert.IsTrue(p.ProductID > 0);
+                var products = new Product(ProviderName, explicitConnection);
+                if (explicitConnection)
+                {
+                    MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnectionAsync(products);
+                }
+                for (int i = 0; i < 4; i++)
+                {
+                    var category = i % 2 == 0 ? insertedCategory1 : insertedCategory2;
+                    var p = await products.InsertAsync(new { ProductName = "Prod" + i, category.CategoryID }, connection: connection);
+                    Assert.IsTrue(p.ProductID > 0);
+                }
+                var allCat1Products = await (await products.AllAsync(connection, where: "WHERE CategoryID=@0", args: category1ID)).ToArrayAsync();
+                Assert.AreEqual(2, allCat1Products.Length);
+                foreach (var p in allCat1Products)
+                {
+                    Assert.AreEqual(category1ID, p.CategoryID);
+                    p.CategoryID = category2ID;
+                }
+                Assert.AreEqual(2, await products.SaveAsync(connection, allCat1Products));
             }
-            var allCat1Products = await (await products.AllAsync(where:"WHERE CategoryID=@0", args:category1ID)).ToArrayAsync();
-            Assert.AreEqual(2, allCat1Products.Length);
-            foreach(var p in allCat1Products)
-            {
-                Assert.AreEqual(category1ID, p.CategoryID);
-                p.CategoryID = category2ID;
-            }
-            Assert.AreEqual(2, await products.SaveAsync(allCat1Products));
         }
 
 
         [Test]
         public async Task Delete_SingleRow()
         {
+            var CategoryName = "Cat Delete_SR";
+
+            var categories = new Category(ProviderName);
+
+            // clear down
+            await categories.DeleteAsync(where: "CategoryName=@0", args: CategoryName);
+
             // first insert 2 categories
-            var categories = new Category();
-            var insertedCategory1 = await categories.InsertAsync(new { CategoryName = "Cat Delete_SR", Description = "cat 1 desc" });
+            var insertedCategory1 = await categories.InsertAsync(new { CategoryName, Description = "cat 1 desc" });
             int category1ID = insertedCategory1.CategoryID;
             Assert.IsTrue(category1ID > 0);
-            var insertedCategory2 = await categories.InsertAsync(new { CategoryName = "Cat Delete_SR", Description = "cat 2 desc" });
+            var insertedCategory2 = await categories.InsertAsync(new { CategoryName, Description = "cat 2 desc" });
             int category2ID = insertedCategory2.CategoryID;
             Assert.IsTrue(category2ID > 0);
 
@@ -127,7 +166,7 @@ namespace Mighty.Dynamic.Tests.SqlServer
         public async Task Delete_MultiRow()
         {
             // first insert 2 categories
-            var categories = new Category();
+            var categories = new Category(ProviderName);
             var insertedCategory1 = await categories.InsertAsync(new { CategoryName = "Cat Delete_MR", Description = "cat 1 desc" });
             int category1ID = insertedCategory1.CategoryID;
             Assert.IsTrue(category1ID > 0);
@@ -144,7 +183,7 @@ namespace Mighty.Dynamic.Tests.SqlServer
         [OneTimeTearDown]
         public async Task CleanUp()
         {
-            var db = new MightyOrm(TestConstants.WriteTestConnection);
+            var db = new MightyOrm(string.Format(TestConstants.WriteTestConnection, ProviderName));
             await db.ExecuteProcedureAsync("pr_clearAll");
         }
     }

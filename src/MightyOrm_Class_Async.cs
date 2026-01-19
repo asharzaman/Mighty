@@ -1,4 +1,6 @@
 #if !NET40
+#pragma warning disable IDE0079
+#pragma warning disable IDE0063
 using System;
 using Dasync.Collections;
 using System.Collections.Generic;
@@ -20,13 +22,187 @@ using Mighty.Interfaces;
 using Mighty.Parameters;
 using Mighty.Profiling;
 using Mighty.Validation;
+using System.Linq;
 
 namespace Mighty
 {
     public partial class MightyOrm<T> : MightyOrmAbstractInterface<T> where T : class, new()
     {
         // Only methods with a non-trivial implementation are here, the rest are in the MightyOrm_Redirects_Async file.
-#region MircoORM interface
+        #region MicroORM interface
+        /// <summary>
+        /// Table meta data (filtered to only contain columns specific to generic type T, or to constructor `columns`, if either is present).
+        /// </summary>
+        /// <remarks>
+        /// Note that this does an asynchronous database SELECT on first access, and the result is then cached.
+        /// Non-locking caching is used: a cached result will be returned after the first such SELECT to complete has finished.
+        /// </remarks>
+        override public async Task<IEnumerable<dynamic>> GetTableMetaDataAsync()
+        {
+            return await GetTableMetaDataAsync(null).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Table meta data (filtered to only contain columns specific to generic type T, or to constructor `columns`, if either is present).
+        /// </summary>
+        /// <remarks>
+        /// Note that this does an asynchronous database SELECT on first access, and the result is then cached.
+        /// Non-locking caching is used: a cached result will be returned after the first such SELECT to complete has finished.
+        /// </remarks>
+        /// <param name="connection">The connection to use</param>
+        override public async Task<IEnumerable<dynamic>> GetTableMetaDataAsync(DbConnection connection)
+        {
+            string connectionString;
+
+            if (connection == null)
+            {
+                if (string.IsNullOrEmpty(ConnectionString))
+                {
+                    throw new InvalidOperationException($"No {nameof(DbConnection)} object and no local or global connection string available in call to {nameof(GetTableMetaData)}");
+                }
+                connectionString = ConnectionString;
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(connection.ConnectionString))
+                {
+                    throw new InvalidOperationException($"No {nameof(connection.ConnectionString)} set on {nameof(DbConnection)} object passed to {nameof(MightyOrm.GetTableMetaDataAsync)}");
+                }
+                connectionString = connection.ConnectionString;
+            }
+
+            return await TableMetaDataStore.Instance.GetAsync(
+                         IsGeneric, Plugin, Factory, connection,
+                         BareTableName, TableOwner, DataContract,
+                         this).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Make a new item, with optional passed-in name-value collection as initialiser.
+        /// </summary>
+        /// <param name="nameValues">The name-value collection</param>
+        /// <param name="addNonPresentAsDefaults">
+        /// If true also include default values for fields not present in the collection
+        /// but which exist in columns for the current table in Mighty, which correctly
+        /// reflect the defaults of the current database table.
+        /// </param>
+        /// <returns></returns>
+        override public async Task<T> NewAsync(object nameValues = null, bool addNonPresentAsDefaults = true)
+        {
+            return await NewAsync(null, nameValues, addNonPresentAsDefaults).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Make a new item, with optional passed-in name-value collection as initialiser.
+        /// </summary>
+        /// <param name="connection">The connection to use</param>
+        /// <param name="nameValues">The name-value collection</param>
+        /// <param name="addNonPresentAsDefaults">
+        /// If true also include default values for fields not present in the collection
+        /// but which exist in columns for the current table in Mighty, which correctly
+        /// reflect the defaults of the current database table.
+        /// </param>
+        /// <returns></returns>
+        override public async Task<T> NewAsync(DbConnection connection, object nameValues = null, bool addNonPresentAsDefaults = true)
+        {
+            var nvtEnumerator = new NameValueTypeEnumerator(DataContract, nameValues);
+            Dictionary<string, object> columnNameToValue = new Dictionary<string, object>();
+            foreach (var nvtInfo in nvtEnumerator)
+            {
+                if (DataContract.TryGetColumnName(nvtInfo.Name, out string columnName))
+                {
+                    columnNameToValue.Add(columnName, nvtInfo.Value);
+                }
+            }
+            object item;
+            IDictionary<string, object> newItemDictionary = null;
+            if (!IsGeneric)
+            {
+                item = new ExpandoObject();
+                newItemDictionary = ((ExpandoObject)item).ToDictionary();
+            }
+            else
+            {
+                item = new T();
+            }
+            // drive the loop by the actual column names
+            foreach (var columnInfo in await GetTableMetaDataAsync(connection).ConfigureAwait(false))
+            {
+                if (!columnInfo.IS_MIGHTY_COLUMN) continue;
+                string columnName = columnInfo.COLUMN_NAME;
+                object value;
+                if (!columnNameToValue.TryGetValue(columnName, out value))
+                {
+                    if (!addNonPresentAsDefaults) continue;
+                    value = Plugin.GetColumnDefault(columnInfo);
+                }
+                if (value != null)
+                {
+                    if (IsGeneric) DataContract.GetDataMemberInfo(columnName).SetValue(item, value);
+                    else newItemDictionary.Add(columnName, value);
+                }
+            }
+            return (T)item;
+        }
+
+        /// <summary>
+        /// Get the meta-data for a single column
+        /// </summary>
+        /// <param name="column">Column name</param>
+        /// <param name="ExceptionOnAbsent">If true throw an exception if there is no such column, otherwise return null.</param>
+        /// <returns></returns>
+        override public async Task<dynamic> GetColumnInfoAsync(string column, bool ExceptionOnAbsent = true)
+        {
+            return await GetColumnInfoAsync(null, column, ExceptionOnAbsent).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Get the meta-data for a single column
+        /// </summary>
+        /// <param name="connection">The connection to use</param>
+        /// <param name="column">Column name</param>
+        /// <param name="ExceptionOnAbsent">If true throw an exception if there is no such column, otherwise return null.</param>
+        /// <returns></returns>
+        override public async Task<dynamic> GetColumnInfoAsync(DbConnection connection, string column, bool ExceptionOnAbsent = true)
+        {
+            var info = (await GetTableMetaDataAsync(connection).ConfigureAwait(false)).Where(c => column.Equals(c.COLUMN_NAME, StringComparison.OrdinalIgnoreCase)).FirstOrDefault();
+            if (ExceptionOnAbsent && info == null)
+            {
+                throw new InvalidOperationException("Cannot find table info for column name " + column);
+            }
+            return info;
+        }
+
+        /// <summary>
+        /// Get the default value for a column.
+        /// </summary>
+        /// <param name="columnName">The column name</param>
+        /// <returns></returns>
+        /// <remarks>
+        /// Although it might look more efficient, GetColumnDefault should not do buffering, as we don't
+        /// want to pass out the same actual object more than once.
+        /// </remarks>
+        override public async Task<object> GetColumnDefaultAsync(string columnName)
+        {
+            return await GetColumnDefaultAsync(null, columnName).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Get the default value for a column.
+        /// </summary>
+        /// <param name="connection">The connection to use</param>
+        /// <param name="columnName">The column name</param>
+        /// <returns></returns>
+        /// <remarks>
+        /// Although it might look more efficient, GetColumnDefault should not do buffering, as we don't
+        /// want to pass out the same actual object more than once.
+        /// </remarks>
+        override public async Task<object> GetColumnDefaultAsync(DbConnection connection, string columnName)
+        {
+            var columnInfo = await GetColumnInfoAsync(connection, columnName).ConfigureAwait(false);
+            return Plugin.GetColumnDefault(columnInfo);
+        }
+
         /// <summary>
         /// Perform aggregate operation on the current table (use for SUM, MAX, MIN, AVG, etc.), with support for named params.
         /// </summary>
@@ -91,7 +267,7 @@ namespace Mighty
         /// <summary>
         /// Update all items matching WHERE clause using fields from the item sent in.
         /// If `keys` has been specified on the current Mighty instance then any primary key fields in the item are ignored.
-        /// The item is not filtered to remove fields not in the table, if you need that you can call <see cref="New"/> with first parameter `partialItem` and second parameter `false` first.
+        /// The item is not filtered to remove fields not in the table, if you need that you can call <see cref="NewAsync(object, bool)"/> with first parameter `partialItem` and second parameter `false` first.
         /// </summary>
         /// <param name="partialItem">Item containing values to update with</param>
         /// <param name="where">WHERE clause specifying which rows to update</param>
@@ -113,7 +289,7 @@ namespace Mighty
         /// <summary>
         /// Update all items matching WHERE clause using fields from the item sent in.
         /// If `keys` has been specified on the current Mighty instance then any primary key fields in the item are ignored.
-        /// The item is not filtered to remove fields not in the table, if you need that you can call <see cref="New"/> with first parameter `partialItem` and second parameter `false` first.
+        /// The item is not filtered to remove fields not in the table, if you need that you can call <see cref="NewAsync(object, bool)"/> with first parameter `partialItem` and second parameter `false` first.
         /// </summary>
         /// <param name="partialItem">Item containing values to update with</param>
         /// <param name="where">WHERE clause specifying which rows to update</param>
@@ -137,7 +313,7 @@ namespace Mighty
         /// <summary>
         /// Update all items matching WHERE clause using fields from the item sent in.
         /// If `keys` has been specified on the current Mighty instance then any primary key fields in the item are ignored.
-        /// The item is not filtered to remove fields not in the table, if you need that you can call <see cref="New"/> with first parameter `partialItem` and second parameter `false` first.
+        /// The item is not filtered to remove fields not in the table, if you need that you can call <see cref="NewAsync(object, bool)"/> with first parameter `partialItem` and second parameter `false` first.
         /// </summary>
         /// <param name="partialItem">Item containing values to update with</param>
         /// <param name="where">WHERE clause specifying which rows to update</param>
@@ -254,6 +430,8 @@ namespace Mighty
             ValidateAction(items, action);
             foreach (var item in items)
             {
+                ExceptionOnDbConnectionOrNull(item);
+
                 if (Validator.ShouldPerformAction(item, action))
                 {
                     var result = await ActionOnItemAsync(action, item, connection, cancellationToken).ConfigureAwait(false);
@@ -264,7 +442,7 @@ namespace Mighty
                         if (IsGeneric && !(modified is T))
                         {
                             // create an item of type T from the modified item (e.g. a name-value dictionary/ExpandoObject)
-                            modified = New(modified, false);
+                            modified = await NewAsync(connection, modified, false).ConfigureAwait(false);
                         }
                         modifiedItems.Add((T)modified);
                     }
@@ -317,7 +495,7 @@ namespace Mighty
         #endregion
 
         // Only methods with a non-trivial implementation are here, the rest are in the DataAccessWrapper abstract class.
-#region DataAccessWrapper interface
+        #region DataAccessWrapper interface
         /// <summary>
         /// Creates a new DbConnection. You do not normally need to call this! (MightyOrm normally manages its own
         /// connections. Create a connection here and pass it on to other MightyOrm commands only in non-standard use
@@ -326,7 +504,19 @@ namespace Mighty
         /// <returns></returns>
         override public async Task<DbConnection> OpenConnectionAsync()
         {
-            return await OpenConnectionAsync(CancellationToken.None);
+            return await OpenConnectionAsync(false).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates a new DbConnection. You do not normally need to call this! (MightyOrm normally manages its own
+        /// connections. Create a connection here and pass it on to other MightyOrm commands only in non-standard use
+        /// cases where you need to explicitly manage transactions or share connections, e.g. when using explicit cursors.)
+        /// </summary>
+        /// <param name="connectionString">Connection string to use</param>
+        /// <returns></returns>
+        override public async Task<DbConnection> OpenConnectionAsync(string connectionString)
+        {
+            return await OpenConnectionAsync(false, CancellationToken.None, connectionString).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -338,9 +528,45 @@ namespace Mighty
         /// <returns></returns>
         override public async Task<DbConnection> OpenConnectionAsync(CancellationToken cancellationToken)
         {
+            return await OpenConnectionAsync(false, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates a new DbConnection. You do not normally need to call this! (MightyOrm normally manages its own
+        /// connections. Create a connection here and pass it on to other MightyOrm commands only in non-standard use
+        /// cases where you need to explicitly manage transactions or share connections, e.g. when using explicit cursors.)
+        /// </summary>
+        /// <param name="connectionString">Connection string to use</param>
+        /// <param name="cancellationToken">Async <see cref="CancellationToken"/></param>
+        /// <returns></returns>
+        override public async Task<DbConnection> OpenConnectionAsync(string connectionString, CancellationToken cancellationToken)
+        {
+            return await OpenConnectionAsync(false, cancellationToken, connectionString).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Internal usage only, creates a new DbConnection.
+        /// </summary>
+        /// <param name="isInternal"><cref>true</cref> if called internally</param>
+        /// <param name="connectionString">Connection string to use</param>
+        /// <param name="cancellationToken">Async <see cref="CancellationToken"/></param>
+        /// <returns></returns>
+        internal async Task<DbConnection> OpenConnectionAsync(bool isInternal, CancellationToken cancellationToken = default, string connectionString = null)
+        {
+            if (string.IsNullOrEmpty(ConnectionString) && string.IsNullOrEmpty(connectionString))
+            {
+                if (isInternal)
+                {
+                    throw new InvalidOperationException("Connection needed to proceed, but no DbConnection object and no per-instance or global connection string available");
+                }
+                else
+                {
+                    throw new InvalidOperationException("No connection string provided, and no per-instance or global connection string available");
+                }
+            }
             var connection = Factory.CreateConnection();
             connection = DataProfiler.ConnectionWrapping(connection);
-            connection.ConnectionString = ConnectionString;
+            connection.ConnectionString = string.IsNullOrEmpty(connectionString) ? ConnectionString : connectionString;
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
             return connection;
         }
@@ -369,7 +595,7 @@ namespace Mighty
             DbConnection connection = null)
         {
             // using applied only to local connection
-            using (var localConn = ((connection == null) ? await OpenConnectionAsync(cancellationToken).ConfigureAwait(false) : null))
+            using (var localConn = ((connection == null) ? await OpenConnectionAsync(true, cancellationToken).ConfigureAwait(false) : null))
             {
                 command.Connection = connection ?? localConn;
                 return await command.ExecuteNonQueryAsync(cancellationToken);
@@ -400,7 +626,7 @@ namespace Mighty
             DbConnection connection = null)
         {
             // using applied only to local connection
-            using (var localConn = ((connection == null) ? await OpenConnectionAsync(cancellationToken).ConfigureAwait(false) : null))
+            using (var localConn = ((connection == null) ? await OpenConnectionAsync(true, cancellationToken).ConfigureAwait(false) : null))
             {
                 command.Connection = connection ?? localConn;
                 return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
@@ -563,7 +789,7 @@ namespace Mighty
                         behavior = CommandBehavior.SingleResult;
                     }
                     // using is applied only to locally generated connection
-                    using (var localConn = (connection == null ? await OpenConnectionAsync(cancellationToken).ConfigureAwait(false) : null))
+                    using (var localConn = (connection == null ? await OpenConnectionAsync(true, cancellationToken).ConfigureAwait(false) : null))
                     {
                         if (command != null)
                         {
@@ -674,9 +900,9 @@ namespace Mighty
             });
         }
 #pragma warning restore CS1998
-#endregion
+        #endregion
 
-#region ORM actions
+        #region ORM actions
         /// <summary>
         /// Save, Insert, Update or Delete an item.
         /// Save means: update item if PK field or fields are present and at non-default values, insert otherwise.
@@ -706,7 +932,7 @@ namespace Mighty
             if (revisedAction == OrmAction.Insert && PrimaryKeyInfo.SequenceNameOrIdentityFunction != null)
             {
                 // *All* DBs return a huge sized number for their identity by default, following Massive we are normalising to int
-                var pk = Convert.ToInt32(await ScalarAsync(command, cancellationToken).ConfigureAwait(false));
+                var pk = Convert.ToInt32(await ScalarAsync(command, cancellationToken, connection).ConfigureAwait(false));
                 var modified = UpsertItemPK(
                     item, pk,
                     // Don't create clone items on Save as these will then be discarded; but do still update the PK if clone not required
@@ -715,11 +941,11 @@ namespace Mighty
             }
             else
             {
-                int n = await ExecuteAsync(command, cancellationToken).ConfigureAwait(false);
+                int n = await ExecuteAsync(command, cancellationToken, connection).ConfigureAwait(false);
                 return new Tuple<int, object>(n, null);
             }
         }
-#endregion
+        #endregion
     }
 }
 #endif

@@ -1,11 +1,7 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Data;
-using System.Dynamic;
+using System.Data.Common;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
 using Mighty.Dynamic.Tests.MySql.TableClasses;
 using NUnit.Framework;
 
@@ -14,7 +10,7 @@ using Mighty.Mapping;
 namespace Mighty.Dynamic.Tests.MySql
 {
     [TestFixture("MySql.Data.MySqlClient")]
-#if !DISABLE_DEVART // Devart works fine on .NET Core, but I want to get a version to test with without paying $100 p/a!
+#if !DISABLE_DEVART
     [TestFixture("Devart.Data.MySql")]
 #endif
     public class WriteTests
@@ -64,27 +60,38 @@ namespace Mighty.Dynamic.Tests.MySql
 
 
         [Test]
-        public void Update_SingleRow()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Update_SingleRow(bool explicitConnection)
         {
-            var categories = new Category(ProviderName);
-            // insert something to update first. 
-            var inserted = categories.Insert(new { CategoryName = "Cool stuff", Description = "You know... cool stuff! Cool. n. stuff." });
-            int insertedCategoryID = inserted.CategoryID;
-            Assert.IsTrue(insertedCategoryID > 0);
-            // update it, with a better description
-            inserted.Description = "This is all jolly marvellous";
-            Assert.AreEqual(1, categories.Update(inserted), "Update should have affected 1 row");
-            var updatedRow = categories.Single(new { inserted.CategoryID });
-            Assert.IsNotNull(updatedRow);
-            Assert.AreEqual(inserted.CategoryID, Convert.ToInt32(updatedRow.CategoryID)); // convert from uint
-            Assert.AreEqual(inserted.Description, updatedRow.Description);
-            // reset description to NULL
-            updatedRow.Description = null;
-            Assert.AreEqual(1, categories.Update(updatedRow), "Update should have affected 1 row");
-            var newUpdatedRow = categories.Single(new { updatedRow.CategoryID });
-            Assert.IsNotNull(newUpdatedRow);
-            Assert.AreEqual(updatedRow.CategoryID, newUpdatedRow.CategoryID);
-            Assert.AreEqual(updatedRow.Description, newUpdatedRow.Description);
+            var categories = new Category(ProviderName, explicitConnection);
+            DbConnection connection = null;
+            if (explicitConnection)
+            {
+                MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnection(categories);
+                connection = categories.OpenConnection(WhenDevart.AddLicenseKey(ProviderName, MightyTests.ConnectionStringUtils.GetConnectionString(TestConstants.WriteTestConnection, ProviderName)));
+            }
+            using (connection)
+            {
+                // insert something to update first. 
+                var inserted = categories.Insert(new { CategoryName = "Cool stuff", Description = "You know... cool stuff! Cool. n. stuff." }, connection: connection);
+                int insertedCategoryID = inserted.CategoryID;
+                Assert.IsTrue(insertedCategoryID > 0);
+                // update it, with a better description
+                inserted.Description = "This is all jolly marvellous";
+                Assert.AreEqual(1, categories.Update(connection, inserted), "Update should have affected 1 row");
+                var updatedRow = categories.Single(new { inserted.CategoryID }, connection: connection);
+                Assert.IsNotNull(updatedRow);
+                Assert.AreEqual(inserted.CategoryID, Convert.ToInt32(updatedRow.CategoryID)); // convert from uint
+                Assert.AreEqual(inserted.Description, updatedRow.Description);
+                // reset description to NULL
+                updatedRow.Description = null;
+                Assert.AreEqual(1, categories.Update(connection, updatedRow), "Update should have affected 1 row");
+                var newUpdatedRow = categories.Single(new { updatedRow.CategoryID }, connection: connection);
+                Assert.IsNotNull(newUpdatedRow);
+                Assert.AreEqual(updatedRow.CategoryID, newUpdatedRow.CategoryID);
+                Assert.AreEqual(updatedRow.Description, newUpdatedRow.Description);
+            }
         }
 
 
@@ -94,7 +101,7 @@ namespace Mighty.Dynamic.Tests.MySql
             // Apply some quick crazy-ass mapping... to an ExpandoObject :-)
             // Remember, we're mapping from crazy fake 'class' names to the sensible underlying column names
             var categories = new MightyOrm(
-                string.Format(TestConstants.WriteTestConnection, ProviderName),
+                WhenDevart.AddLicenseKey(ProviderName, string.Format(TestConstants.WriteTestConnection, ProviderName)),
                 "MassiveWriteTests.Categories",
                 primaryKeys: "MYCATEGORYID",
                 columns: "MYCATEGORYID, TheName, ItsADescription",
@@ -194,7 +201,7 @@ namespace Mighty.Dynamic.Tests.MySql
         [OneTimeTearDown]
         public void CleanUp()
         {
-            var db = new MightyOrm(string.Format(TestConstants.WriteTestConnection, ProviderName));
+            var db = new MightyOrm(WhenDevart.AddLicenseKey(ProviderName, string.Format(TestConstants.WriteTestConnection, ProviderName)));
             db.ExecuteProcedure("pr_clearAll");
         }
     }

@@ -1,4 +1,6 @@
 ﻿#if !NET40
+#pragma warning disable IDE0079
+#pragma warning disable IDE0063
 using System;
 using System.Collections;
 using Dasync.Collections;
@@ -16,7 +18,7 @@ using NUnit.Framework;
 namespace Mighty.Generic.Tests.MySql
 {
     [TestFixture("MySql.Data.MySqlClient")]
-#if !DISABLE_DEVART // Devart works fine on .NET Core, but I want to get a version to test with without paying $100 p/a!
+#if !DISABLE_DEVART
     [TestFixture("Devart.Data.MySql")]
 #endif
     public class AsyncReadTests
@@ -61,19 +63,19 @@ namespace Mighty.Generic.Tests.MySql
 
 
         [Test]
-        public void EmptyElement_ProtoType()
+        public async Task EmptyElement_ProtoType()
         {
             var films = new Films(ProviderName);
-            var defaults = films.New();
+            var defaults = await films.NewAsync();
             Assert.IsTrue(defaults.last_update > DateTime.MinValue);
         }
 
 
         [Test]
-        public void SchemaTableMetaDataRetrieval()
+        public async Task SchemaTableMetaDataRetrieval()
         {
             var films = new Films(ProviderName);
-            var metaData = films.TableMetaData;
+            var metaData = await films.GetTableMetaDataAsync();
             Assert.IsNotNull(metaData);
             Assert.AreEqual(13, metaData.Count());
             Assert.IsTrue(metaData.All(v => v.TABLE_NAME == films.BareTableName));

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
@@ -137,16 +138,32 @@ namespace Mighty.Interfaces
         /// </summary>
         abstract public bool IsGeneric { get; protected set; }
 
+#if NET40
         /// <summary>
-        /// Table meta data (filtered to be only for columns specified by the generic type T, or by consturctor `columns`, if present)
+        /// Table meta data (filtered to only contain columns specific to generic type T, or to constructor `columns`, if either is present).
         /// </summary>
+        /// <remarks>
+        /// Note that this does a synchronous database SELECT on first access, and the result is then cached.
+        /// Non-locking caching is used: a cached result will be returned after the first such SELECT to complete has finished.
+        /// </remarks>
         abstract public IEnumerable<dynamic> TableMetaData { get; }
-#endregion
+#else
+        /// <summary>
+        /// Table meta data (filtered to only contain columns specific to generic type T, or to constructor `columns`, if either is present).
+        /// </summary>
+        /// <remarks>
+        /// Note that this does a synchronous database SELECT on first access, and the result is then cached.
+        /// Use <see cref="GetTableMetaDataAsync()"/> for async acccess.
+        /// Non-locking caching is used: a cached result will be returned after the first such SELECT to complete has finished.
+        /// </remarks>
+        abstract public IEnumerable<dynamic> TableMetaData { get; }
+#endif
+        #endregion
 
         // 'Interface' for the general purpose data access wrapper methods (i.e. the ones which can be used
         // even if no table has been specified).
         // All versions which simply redirect to other versions are defined here, not in the main class.
-#region Non-table specific methods
+        #region Non-table specific methods
         /// <summary>
         /// Create a <see cref="DbCommand"/> ready for use with Mighty.
         /// Manually creating commands is an advanced use-case; standard Mighty methods create and dispose
@@ -203,39 +220,9 @@ namespace Mighty.Interfaces
         /// <param name="cmd">The command</param>
         /// <returns></returns>
         abstract public dynamic ResultsAsExpando(DbCommand cmd);
-#endregion
+        #endregion
 
-#region Table specific methods
-        /// <summary>
-        /// Return a new item populated with defaults which correctly reflect the defaults of the current database table, if any.
-        /// </summary>
-        /// <param name="nameValues">Optional name-value collection from which to initialise some or all of the fields</param>
-        /// <param name="addNonPresentAsDefaults">
-        /// When true also include default values for fields not present in <paramref name="nameValues"/>
-        /// but which exist in the defined list of columns for the current table in Mighty
-        /// </param>
-        /// <returns></returns>
-        abstract public T New(object nameValues = null, bool addNonPresentAsDefaults = true);
-
-        /// <summary>
-        /// Get the meta-data for a single column
-        /// </summary>
-        /// <param name="column">Column name</param>
-        /// <param name="ExceptionOnAbsent">If true throw an exception if there is no such column, otherwise return null.</param>
-        /// <returns></returns>
-        abstract public dynamic GetColumnInfo(string column, bool ExceptionOnAbsent = true);
-
-        /// <summary>
-        /// Get the default value for a column.
-        /// </summary>
-        /// <param name="columnName">The column name</param>
-        /// <returns></returns>
-        /// <remarks>
-        /// Although it might look more efficient, GetColumnDefault should not do buffering, as we don't
-        /// want to pass out the same actual object more than once.
-        /// </remarks>
-        abstract public object GetColumnDefault(string columnName);
-
+        #region Table specific methods
         /// <summary>
         /// Is the passed in item valid against the current validator?
         /// </summary>
@@ -258,6 +245,6 @@ namespace Mighty.Interfaces
         /// <param name="alwaysArray">If true return object[] of 1 item, even for simple PK</param>
         /// <returns></returns>
         abstract public object GetPrimaryKey(object item, bool alwaysArray = false);
-#endregion
+        #endregion
     }
 }

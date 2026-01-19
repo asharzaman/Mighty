@@ -1,7 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 namespace Mighty.Generic.Tests.SqlServer.TableClasses
 {
@@ -23,13 +20,18 @@ namespace Mighty.Generic.Tests.SqlServer.TableClasses
 
     public class Categories : MightyOrm<Category>
     {
-        public Categories() : this(true)
+        public Categories(string providerName, bool explicitConnection = false) : this(providerName, true, explicitConnection)
         {
         }
 
 
-        public Categories(bool includeSchema) :
-            base(TestConstants.WriteTestConnection, includeSchema ? "dbo.Categories" : "Categories", "CategoryID")
+        public Categories(string providerName, bool includeSchema, bool explicitConnection = false) :
+            base(
+                explicitConnection ?
+                    $"providerName={providerName}" :
+                    string.Format(TestConstants.WriteTestConnection, providerName),
+                includeSchema ? "dbo.Categories" : "Categories",
+                "CategoryID")
         {
         }
     }

@@ -1,18 +1,18 @@
-﻿#if !NET40 && !NETCOREAPP2_0 // TO DO: Why is AsyncEnumerator ForEachAsync not available in .NET Core 2.0 (when it is in 1.0, 1.1 and 3.0)?
+﻿#if !NET40
 using System;
-using System.Data;
-using System.Dynamic;
-using Dasync.Collections;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Dynamic;
+using System.Threading.Tasks;
+using System.Threading;
 #if !NETCOREAPP
 using System.Transactions;
 #endif
-using Mighty.Dynamic.Tests.PostgreSql.TableClasses;
+
+using Dasync.Collections;
+
 using NUnit.Framework;
-using System.Threading.Tasks;
-using System.Threading;
+
+using Mighty.Dynamic.Tests.PostgreSql.TableClasses;
 
 namespace Mighty.Dynamic.Tests.PostgreSql
 {
@@ -183,7 +183,7 @@ namespace Mighty.Dynamic.Tests.PostgreSql
             Assert.AreEqual(4, count);
         }
 
-#region Dereferencing tests
+        #region Dereferencing tests
         [Test]
         public async Task DereferenceCursorOutputParameter()
         {
@@ -226,15 +226,25 @@ namespace Mighty.Dynamic.Tests.PostgreSql
         }
 
 
-        [Test]
-        public async Task DereferenceFromQuery_ManualWrapping()
+       [Test]
+       [TestCase(false)]
+       [TestCase(true)]
+       public async Task DereferenceFromQuery_ManualWrapping(bool explicitConnection)
         {
-            var db = new SPTestsDatabase();
+            var db = new SPTestsDatabase(explicitConnection);
+            if (explicitConnection)
+            {
+                MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnectionAsync(db);
+            }
             // without a cursor param, nothing will trigger the wrapping transaction support in Massive
             // so in this case we need to add the wrapping transaction manually (with TransactionScope or
             // BeginTransaction, see other examples in this file)
             int count = 0;
-            using (var conn = await db.OpenConnectionAsync())
+            using (var conn = await db.OpenConnectionAsync(
+                explicitConnection ?
+                    MightyTests.ConnectionStringUtils.GetConnectionString(TestConstants.ReadWriteTestConnection, TestConstants.ProviderName) :
+                    null
+                    ))
             {
                 using (var trans = conn.BeginTransaction())
                 {
@@ -268,7 +278,17 @@ namespace Mighty.Dynamic.Tests.PostgreSql
         }
 
         // Test various dereferencing patters (more relevant since we are coding this ourselves)
-        private async Task CheckMultiResultSetStructureAsync(IAsyncEnumerable<IAsyncEnumerable<dynamic>> results, int count0 = 1, int count1 = 1, bool breakTest = false, bool idTest = false)
+        private async Task CheckMultiResultSetStructureAsync(
+#if NETCOREAPP2_0
+            Dasync.Collections.
+#endif
+            IAsyncEnumerable<
+#if NETCOREAPP2_0
+                Dasync.Collections.
+#endif
+                IAsyncEnumerable<dynamic>
+            > results,
+            int count0 = 1, int count1 = 1, bool breakTest = false, bool idTest = false)
         {
             int sets = 0;
             int[] counts = new int[2];
@@ -340,7 +360,7 @@ namespace Mighty.Dynamic.Tests.PostgreSql
             var resultCTestToBreak = await db.QueryMultipleFromProcedureAsync("cbreaktest", ioParams: new { c1 = new Cursor(), c2 = new Cursor() });
             await CheckMultiResultSetStructureAsync(resultCTestToBreak, breakTest: true);
         }
-#endregion
+        #endregion
 
         [Test]
         public async Task QueryFromMixedCursorOutput()
@@ -364,10 +384,20 @@ namespace Mighty.Dynamic.Tests.PostgreSql
         }
 
         [Test]
-        public async Task InputCursors_BeginTransaction()
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task InputCursors_BeginTransaction(bool explicitConnection)
         {
-            var db = new SPTestsDatabase();
-            using (var conn = await db.OpenConnectionAsync())
+            var db = new SPTestsDatabase(explicitConnection);
+            if (explicitConnection)
+            {
+                MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnectionAsync(db);
+            }
+            using (var conn = await db.OpenConnectionAsync(
+                explicitConnection ?
+                    MightyTests.ConnectionStringUtils.GetConnectionString(TestConstants.ReadWriteTestConnection, TestConstants.ProviderName) :
+                    null
+                    ))
             {
                 // cursors in PostgreSQL must share a transaction (not just a connection, as in Oracle)
                 using (var trans = conn.BeginTransaction())
@@ -395,12 +425,22 @@ namespace Mighty.Dynamic.Tests.PostgreSql
         }
 
         [Test]
-        public async Task InputCursors_TransactionScope()
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task InputCursors_TransactionScope(bool explicitConnection)
         {
-            var db = new SPTestsDatabase();
+            var db = new SPTestsDatabase(explicitConnection);
+            if (explicitConnection)
+            {
+                MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnectionAsync(db);
+            }
 
             // cursors in PostgreSQL must share a transaction (not just a connection, as in Oracle)
-            using (var conn = await db.OpenConnectionAsync())
+            using (var conn = await db.OpenConnectionAsync(
+                explicitConnection ?
+                    MightyTests.ConnectionStringUtils.GetConnectionString(TestConstants.ReadWriteTestConnection, TestConstants.ProviderName) :
+                    null
+                    ))
             {
                 using (var trans = conn.BeginTransaction())
                 {
@@ -433,13 +473,24 @@ namespace Mighty.Dynamic.Tests.PostgreSql
         /// For 1XN as here we have to use Query with automatic dereferencing turned off.
         /// </summary>
         [Test]
-        public async Task InputCursors_1XN()
+        [TestCase(false)]
+        [TestCase(true)]
+        public async Task InputCursors_1XN(bool explicitConnection)
         {
-            var db = new SPTestsDatabase();
+            var db = new SPTestsDatabase(explicitConnection);
             db.NpgsqlAutoDereferenceCursors = false; // for this instance only
 
+            if (explicitConnection)
+            {
+                MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnectionAsync(db);
+            }
+
             // cursors in PostgreSQL must share a transaction (not just a connection, as in Oracle)
-            using (var conn = await db.OpenConnectionAsync())
+            using (var conn = await db.OpenConnectionAsync(
+                explicitConnection ?
+                    MightyTests.ConnectionStringUtils.GetConnectionString(TestConstants.ReadWriteTestConnection, TestConstants.ProviderName) :
+                    null
+                    ))
             {
 
                 using (var trans = conn.BeginTransaction())

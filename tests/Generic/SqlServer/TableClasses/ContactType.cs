@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Mighty.Generic.Tests.SqlServer.TableClasses
 {
@@ -14,13 +10,13 @@ namespace Mighty.Generic.Tests.SqlServer.TableClasses
     }
     public class ContactTypes : MightyOrm<ContactType>
     {
-        public ContactTypes() : this(true)
+        public ContactTypes(string providerName) : this(providerName, true)
         {
         }
 
 
-        public ContactTypes(bool includeSchema) :
-            base(TestConstants.ReadTestConnection, includeSchema ? "Person.ContactType" : "ContactType", "ContactTypeID", "Name")
+        public ContactTypes(string providerName, bool includeSchema) :
+            base(string.Format(TestConstants.ReadTestConnection, providerName), includeSchema ? "Person.ContactType" : "ContactType", "ContactTypeID", "Name")
         {
         }
     }

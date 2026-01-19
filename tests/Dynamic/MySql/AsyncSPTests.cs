@@ -15,7 +15,7 @@ using NUnit.Framework;
 namespace Mighty.Dynamic.Tests.MySql
 {
     [TestFixture("MySql.Data.MySqlClient")]
-#if !DISABLE_DEVART // Devart works fine on .NET Core, but I want to get a version to test with without paying $100 p/a!
+#if !DISABLE_DEVART
     [TestFixture("Devart.Data.MySql")]
 #endif
     public class AsyncSPTests
@@ -139,7 +139,7 @@ namespace Mighty.Dynamic.Tests.MySql
 
 
         // Massive style calls to some examples from https://www.devart.com/dotconnect/mysql/docs/Parameters.html#inoutparams
-#region Devart Examples
+        #region Devart Examples
         [Test]
         public async Task In_Out_Params_SQL()
         {
@@ -174,7 +174,7 @@ namespace Mighty.Dynamic.Tests.MySql
             var result = await db.ExecuteProcedureAsync("testproc_inout", ioParams: new { param1 = 10 });
             Assert.AreEqual(20, result.param1);
         }
-#endregion
+        #endregion
     }
 }
 #endif

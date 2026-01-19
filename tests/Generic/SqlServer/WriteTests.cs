@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 
 using NUnit.Framework;
@@ -8,13 +9,23 @@ using Mighty.Generic.Tests.SqlServer.TableClasses;
 
 namespace Mighty.Generic.Tests.SqlServer
 {
-    [TestFixture]
+    [TestFixture("System.Data.SqlClient")]
+#if NETCOREAPP3_1
+    [TestFixture("Microsoft.Data.SqlClient")]
+#endif
     public class WriteTests
     {
+        private readonly string ProviderName;
+
+        public WriteTests(string providerName)
+        {
+            ProviderName = providerName;
+        }
+
         [Test]
         public void Insert_SingleRow()
         {
-            var categories = new Categories();
+            var categories = new Categories(ProviderName);
             var inserted = categories.Insert(new { CategoryName = "Cool stuff", Description = "You know... cool stuff! Cool. n. stuff." });
             int insertedCategoryID = inserted.CategoryID;
             Assert.IsTrue(insertedCategoryID > 0);
@@ -24,7 +35,7 @@ namespace Mighty.Generic.Tests.SqlServer
         [Test]
         public void Insert_FromNew()
         {
-            Categories categories = new Categories();
+            Categories categories = new Categories(ProviderName);
             Category toInsert = categories.New();
             toInsert.CategoryName = "Cool stuff";
             toInsert.Description = "You know... cool stuff! Cool. n. stuff.";
@@ -37,7 +48,7 @@ namespace Mighty.Generic.Tests.SqlServer
         [Test]
         public void Insert_MultipleRows()
         {
-            var categories = new Categories();
+            var categories = new Categories(ProviderName);
             var toInsert = new List<dynamic>();
             var CategoryName = "Cat Insert_MR";
             toInsert.Add(new { CategoryName, Description = "cat 1 desc" });
@@ -59,7 +70,7 @@ namespace Mighty.Generic.Tests.SqlServer
         [Test]
         public void Update_SingleRow()
         {
-            var categories = new Categories();
+            var categories = new Categories(ProviderName);
             // insert something to update first. 
             Category inserted = categories.Insert(new { CategoryName = "Cool stuff", Description = "You know... cool stuff! Cool. n. stuff." });
             int insertedCategoryID = inserted.CategoryID;
@@ -82,32 +93,47 @@ namespace Mighty.Generic.Tests.SqlServer
 
 
         [Test]
-        public void Update_MultipleRows()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void Update_MultipleRows(bool explicitConnection)
         {
             // first insert 2 categories and 4 products, one for each category
-            var categories = new Categories();
-            var insertedCategory1 = categories.Insert(new { CategoryName = "Category 1", Description = "Cat 1 desc" });
-            int category1ID = insertedCategory1.CategoryID;
-            Assert.IsTrue(category1ID > 0);
-            var insertedCategory2 = categories.Insert(new { CategoryName = "Category 2", Description = "Cat 2 desc" });
-            int category2ID = insertedCategory2.CategoryID;
-            Assert.IsTrue(category2ID > 0);
+            var categories = new Categories(ProviderName, explicitConnection);
+            DbConnection connection = null;
+            if (explicitConnection)
+            {
+                MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnection(categories);
+                connection = categories.OpenConnection(MightyTests.ConnectionStringUtils.GetConnectionString(TestConstants.WriteTestConnection, ProviderName));
+            }
+            using (connection)
+            {
+                var insertedCategory1 = categories.Insert(new { CategoryName = "Category 1", Description = "Cat 1 desc" }, connection);
+                int category1ID = insertedCategory1.CategoryID;
+                Assert.IsTrue(category1ID > 0);
+                var insertedCategory2 = categories.Insert(new { CategoryName = "Category 2", Description = "Cat 2 desc" }, connection);
+                int category2ID = insertedCategory2.CategoryID;
+                Assert.IsTrue(category2ID > 0);
 
-            var products = new Products();
-            for (int i = 0; i < 4; i++)
-            {
-                var category = i % 2 == 0 ? insertedCategory1 : insertedCategory2;
-                var p = products.Insert(new { ProductName = "Prod" + i, category.CategoryID });
-                Assert.IsTrue(p.ProductID > 0);
+                var products = new Products(ProviderName, explicitConnection);
+                if (explicitConnection)
+                {
+                    MightyTests.ConnectionStringUtils.CheckConnectionStringRequiredForOpenConnection(products);
+                }
+                for (int i = 0; i < 4; i++)
+                {
+                    var category = i % 2 == 0 ? insertedCategory1 : insertedCategory2;
+                    var p = products.Insert(new { ProductName = "Prod" + i, category.CategoryID }, connection);
+                    Assert.IsTrue(p.ProductID > 0);
+                }
+                var allCat1Products = products.All(connection, where: "WHERE CategoryID=@0", args: category1ID).ToArray();
+                Assert.AreEqual(2, allCat1Products.Length);
+                foreach (var p in allCat1Products)
+                {
+                    Assert.AreEqual(category1ID, p.CategoryID);
+                    p.CategoryID = category2ID;
+                }
+                Assert.AreEqual(2, products.Save(connection, allCat1Products));
             }
-            var allCat1Products = products.All(where: "WHERE CategoryID=@0", args: category1ID).ToArray();
-            Assert.AreEqual(2, allCat1Products.Length);
-            foreach (var p in allCat1Products)
-            {
-                Assert.AreEqual(category1ID, p.CategoryID);
-                p.CategoryID = category2ID;
-            }
-            Assert.AreEqual(2, products.Save(allCat1Products));
         }
 
 
@@ -115,7 +141,7 @@ namespace Mighty.Generic.Tests.SqlServer
         public void Delete_SingleRow()
         {
             // first insert 2 categories
-            var categories = new Categories();
+            var categories = new Categories(ProviderName);
             var insertedCategory1 = categories.Insert(new { CategoryName = "Cat Delete_SR", Description = "cat 1 desc" });
             int category1ID = insertedCategory1.CategoryID;
             Assert.IsTrue(category1ID > 0);
@@ -134,7 +160,7 @@ namespace Mighty.Generic.Tests.SqlServer
         public void Delete_MultiRow()
         {
             // first insert 2 categories
-            var categories = new Categories();
+            var categories = new Categories(ProviderName);
             var insertedCategory1 = categories.Insert(new { CategoryName = "Cat Delete_MR", Description = "cat 1 desc" });
             int category1ID = insertedCategory1.CategoryID;
             Assert.IsTrue(category1ID > 0);
@@ -152,7 +178,7 @@ namespace Mighty.Generic.Tests.SqlServer
         [Test]
         public void ReadWrite_Enum()
         {
-            var db = new EnumTests();
+            var db = new EnumTests(ProviderName);
             var values = new {
                 ByteField = EnumTest.MyByteEnum.value_3,
                 ShortField = EnumTest.MyShortEnum.value_6,
@@ -175,7 +201,7 @@ namespace Mighty.Generic.Tests.SqlServer
         [Test]
         public void ReadWrite_IntsIntoEnums()
         {
-            var db = new EnumTests();
+            var db = new EnumTests(ProviderName);
             var intValues = new { ByteField = 4, ShortField = 7, IntField = 10 };
             var item = db.Insert(intValues);
             var reloaded = db.Single("EnumTestID = @0", item.ID);
@@ -189,7 +215,7 @@ namespace Mighty.Generic.Tests.SqlServer
         [OneTimeTearDown]
         public void CleanUp()
         {
-            var db = new MightyOrm(TestConstants.WriteTestConnection);
+            var db = new MightyOrm(string.Format(TestConstants.WriteTestConnection, ProviderName));
             db.ExecuteProcedure("pr_clearAll");
         }
     }

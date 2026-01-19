@@ -1,4 +1,6 @@
 ﻿#if !NET40
+#pragma warning disable IDE0079
+#pragma warning disable IDE0063
 using System;
 using System.Collections;
 using Dasync.Collections;
@@ -16,7 +18,7 @@ using NUnit.Framework;
 namespace Mighty.Dynamic.Tests.MySql
 {
     [TestFixture("MySql.Data.MySqlClient")]
-#if !DISABLE_DEVART // Devart works fine on .NET Core, but I want to get a version to test with without paying $100 p/a!
+#if !DISABLE_DEVART
     [TestFixture("Devart.Data.MySql")]
 #endif
     public class AsyncReadTests
@@ -36,7 +38,7 @@ namespace Mighty.Dynamic.Tests.MySql
         [Test]
         public async Task Use_GlobalConnectionString()
         {
-            MightyOrm.GlobalConnectionString = string.Format(TestConstants.ReadTestConnection, ProviderName);
+            MightyOrm.GlobalConnectionString = WhenDevart.AddLicenseKey(ProviderName, string.Format(TestConstants.ReadTestConnection, ProviderName));
             dynamic film = new MightyOrm(tableName: "sakila.film");
             var singleInstance = await film.SingleAsync(new { film_id = 43 });
             Assert.AreEqual(43, singleInstance.film_id);
@@ -47,7 +49,7 @@ namespace Mighty.Dynamic.Tests.MySql
         public async Task Guid_Arg()
         {
             // MySQL has native Guid parameter support, but the SELECT output is a string
-            var db = new MightyOrm(string.Format(TestConstants.ReadTestConnection, ProviderName));
+            var db = new MightyOrm(WhenDevart.AddLicenseKey(ProviderName, string.Format(TestConstants.ReadTestConnection, ProviderName)));
             var guid = Guid.NewGuid();
             dynamic item;
             using (var command = db.CreateCommand("SELECT @0 AS val", null, guid))
@@ -88,19 +90,19 @@ namespace Mighty.Dynamic.Tests.MySql
 
 
         [Test]
-        public void EmptyElement_ProtoType()
+        public async Task EmptyElement_ProtoType()
         {
             var film = new Film(ProviderName);
-            dynamic defaults = film.New();
+            dynamic defaults = await film.NewAsync();
             Assert.IsTrue(defaults.last_update > DateTime.MinValue);
         }
 
 
         [Test]
-        public void SchemaTableMetaDataRetrieval()
+        public async Task SchemaTableMetaDataRetrieval()
         {
             var film = new Film(ProviderName);
-            var metaData = film.TableMetaData;
+            var metaData = await film.GetTableMetaDataAsync();
             Assert.IsNotNull(metaData);
             Assert.AreEqual(13, metaData.Count());
             Assert.IsTrue(metaData.All(v => v.TABLE_NAME == film.BareTableName));

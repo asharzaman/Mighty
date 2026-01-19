@@ -1,19 +1,21 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 namespace Mighty.Dynamic.Tests.SqlServer.TableClasses
 {
     public class Product : MightyOrm
     {
-        public Product() : this(includeSchema:true)
+        public Product(string providerName, bool explicitConnection = false) : this(providerName, true, explicitConnection)
         {
         }
 
 
-        public Product(bool includeSchema) :
-            base(TestConstants.WriteTestConnection, includeSchema ? "dbo.Products" : "Products", "ProductID")
+        public Product(string providerName, bool includeSchema, bool explicitConnection = false) :
+            base(
+                explicitConnection ?
+                    $"providerName={providerName}" :
+                    string.Format(TestConstants.WriteTestConnection, providerName),
+                includeSchema ? "dbo.Products" : "Products",
+                "ProductID")
         {
         }
     }
